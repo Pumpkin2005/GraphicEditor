@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Графічний редактор</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #ffe6ec; }
+        #toolbar {
+            padding: 15px;
+            background: #ffd1dc;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        #toolbar select,
+        #toolbar input[type="color"],
+        #toolbar input[type="range"],
+        #toolbar button {
+            font-size: 1.2rem;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        #toolbar button {
+            background: #ffb3c1;
+            cursor: pointer;
+        }
+        #toolbar button:hover {
+            background: #ffa3b3;
+        }
+        #canvasContainer {
+            overflow: auto;
+            width: 1000px;
+            height: 700px;
+            margin: 20px auto;
+            border: 2px solid #000;
+        }
+        #canvas {
+            display: block;
+            transform-origin: 0 0;
+            background: #fff;
+        }
+    </style>
+</head>
+<body>
+
+<div id="toolbar">
+    <select id="tool">
+        <option value="line">Лінія</option>
+        <option value="circle">Коло</option>
+        <option value="rectangle">Прямокутник</option>
+        <option value="square">Квадрат</option>
+    </select>
+
+    <input type="color" id="color" value="#000000">
+
+    <label for="brushSize">Розмір пензлика:</label>
+    <input type="range" id="brushSize" min="1" max="20" value="2">
+    <span id="brushSizeValue">2</span>
+    <label for="zoom">Масштаб:</label>
+    <input type="range" id="zoom" min="0.5" max="2" step="0.1" value="1">
+    <span id="zoomValue">100%</span>
+    <button onclick="clearCanvas()">Очистити</button>
+
+    <button id="download-png-btn">Зберегти</button>
+    <input type="file" id="upload" style="display: none" onchange="uploadDrawing(event)" />
+    <button onclick="document.getElementById('upload').click()">Завантажити</button>
+</div>
+
+<div id="canvasContainer">
+    <canvas id="canvas" width="1000" height="700"></canvas>
+</div>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const tool = document.getElementById('tool');
+    const color = document.getElementById('color');
+    const brushSize = document.getElementById('brushSize');
+    const brushSizeValue = document.getElementById('brushSizeValue');
+    const zoomControl = document.getElementById('zoom');
+    const zoomValue = document.getElementById('zoomValue');
+    const canvasContainer = document.getElementById('canvasContainer');
+
+    let startX, startY, drawing = false;
+    let snapshot;
+
+    // Відобразити початкові значення контролів
+    brushSizeValue.textContent = brushSize.value;
+    zoomValue.textContent = `${Math.round(zoomControl.value * 100)}%`;
+
+    // Оновлення значення пензлика
+    brushSize.addEventListener('input', () => {
+        brushSizeValue.textContent = brushSize.value;
+    });
+
+    // Оновлення масштабу
+    zoomControl.addEventListener('input', () => {
+        const scale = parseFloat(zoomControl.value);
+        canvas.style.transform = `scale(${scale})`;
+        canvasContainer.style.width = `${1000 * scale}px`;
+        canvasContainer.style.height = `${700 * scale}px`;
+        zoomValue.textContent = `${Math.round(scale * 100)}%`;
+    });
+    function uploadDrawing(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const img = new Image();
+        const reader = new FileReader();
+
+        reader.onload = function (e) {
+            img.onload = function () {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0);
+            };
+            img.src = e.target.result;
+        };
+
+        reader.readAsDataURL(file);
+    }
+
+    function takeSnapshot() {
+        snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    }
+
+    function restoreSnapshot() {
+        if (snapshot) {
+            ctx.putImageData(snapshot, 0, 0);
+        }
+    }
+    
+
+    canvas.addEventListener('mousedown', e => {
+        startX = e.offsetX;
+        startY = e.offsetY;
+        drawing = true;
+        takeSnapshot();
+    });
+
+    canvas.addEventListener('mousemove', e => {
+        if (!drawing) return;
+        restoreSnapshot();
+
+        const endX = e.offsetX;
+        const endY = e.offsetY;
+
+        // Налаштування пензлика
+        ctx.lineWidth = brushSize.value;
+        ctx.strokeStyle = color.value;
+
+        switch (tool.value) {
+            case 'line':
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(endX, endY);
+                ctx.stroke();
+                break;
+            case 'circle':
+                const radius = Math.hypot(endX - startX, endY - startY);
+                ctx.beginPath();
+                ctx.arc(startX, startY, radius, 0, Math.PI * 2);
+                ctx.stroke();
+                break;
+            case 'rectangle':
+                ctx.strokeRect(startX, startY, endX - startX, endY - startY);
+                break;
+            case 'square':
+                const size = Math.max(
+                    Math.abs(endX - startX),
+                    Math.abs(endY - startY)
+                );
+                const w = endX < startX ? -size : size;
+                const h = endY < startY ? -size : size;
+                ctx.strokeRect(startX, startY, w, h);
+                break;
+        }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+        drawing = false;
+    });
+
+    function clearCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+</script>
+<script>
+    document.getElementById("download-png-btn").addEventListener("click", function () {
+        const canvas = document.getElementById("canvas"); // правильний ID
+        const link = document.createElement("a");
+        link.href = canvas.toDataURL("image/png");
+        link.download = "drawing.png";
+        link.click();
+    });
+</script>
+
+</body>
+</html>
