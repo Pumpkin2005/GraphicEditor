@@ -5,10 +5,10 @@ FROM openjdk:17-jdk-alpine
 WORKDIR /app
 
 # Step 3: Copy the Spring Boot JAR file into the container
-COPY target/graphiceditor-1.0.0.jar /app/graphiceditor-1.0.0.jar
+COPY target/graphic-editor-1.0-SNAPSHOT.jar /app/graphic-editor-1.0-SNAPSHOT.jar
 
 # Step 4: Expose the port your application runs on
 EXPOSE 8080
 
 # Step 5: Define the command to run your Spring Boot application
-CMD ["java", "-jar", "/app/graphiceditor-1.0.0.jar"]
+CMD ["java", "-jar", "/app/graphic-editor-1.0-SNAPSHOT.jar"]
