@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Maria Graphic Editor</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #ffe6ec; }
+        #toolbar {
+            padding: 15px; background: #ffd1dc; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;
+        }
+        #toolbar select, #toolbar input[type="color"], #toolbar input[type="range"], #toolbar button {
+            font-size: 1.2rem; padding: 8px; border: 1px solid #ccc; border-radius: 5px;
+        }
+        #toolbar button {
+            background: #ffb3c1; cursor: pointer;
+        }
+        #toolbar button:hover {
+            background: #ffa3b3;
+        }
+
+        #canvasContainer {
+            overflow: auto; width: 1000px; height: 700px; margin: 20px auto; border: 2px solid #000;
+        }
+        #canvas {
+            display: block; transform-origin: 0 0; background: #fff;
+        }
+    </style>
+</head>
+<body>
+
+<div id="toolbar">
+    <select id="tool">
+        <option value="line">Line</option>
+        <option value="circle">Circle</option>
+        <option value="rectangle">Rectangle</option>
+        <option value="square">Square</option>
+    </select>
+
+    <input type="color" id="color" value="#000000">
+
+    <label for="brushSize">Brush size:</label>
+    <input type="range" id="brushSize" min="1" max="20" value="2">
+    <span id="brushSizeValue">2</span>
+
+    <label for="zoom">Scale:</label>
+    <input type="range" id="zoom" min="0.5" max="2" step="0.1" value="1">
+    <span id="zoomValue">100%</span>
+
+    <button onclick="clearCanvas()">Clean up</button>
+    <button id="download-png-btn">Save as PNG</button>
+    <input type="file" id="upload" accept="image/*" style="display: none;" onchange="loadImageFromFile(event)">
+    <button onclick="document.getElementById('upload').click()">Download</button>
+    <button onclick="openAuthModal()">Authorization</button>
+    <button onclick="logoutUser()">Logout</button>
+    <span id="userEmail" style="font-size: 1rem; color: #333;"></span>
+</div>
+
+<div id="canvasContainer">
+    <canvas id="canvas" width="1000" height="700"></canvas>
+</div>
+
+<div id="authModal" style="display: none; position: fixed; top: 0; left: 0;
+    width: 100vw; height: 100vh; background: rgba(0,0,0,0.6);
+    display: flex; justify-content: center; align-items: center; z-index: 1000;">
+    <div style="background: #ffe6f0; padding: 40px; border-radius: 15px; width: 450px;">
+        <h2 style="font-size: 28px; text-align: center; margin-bottom: 25px;">Registration or Login</h2>
+
+        <input type="email" id="email" placeholder="Email"
+               style="width:100%; margin: 10px 0; padding: 15px; font-size: 18px; border-radius: 8px; border: 1px solid #ccc;"><br>
+
+        <input type="password" id="password" placeholder="Password"
+               style="width:100%; margin: 10px 0; padding: 15px; font-size: 18px; border-radius: 8px; border: 1px solid #ccc;"><br>
+
+        <div style="display: flex; justify-content: space-between; margin-top: 20px;">
+            <button onclick="registerUser()"
+                    style="flex: 1; margin-right: 10px; padding: 12px; font-size: 16px; border-radius: 8px; cursor: pointer;">Registration</button>
+            <button onclick="loginUser()"
+                    style="flex: 1; margin-left: 10px; padding: 12px; font-size: 16px; border-radius: 8px; cursor: pointer;">Login</button>
+        </div>
+
+        <button onclick="closeAuthModal()"
+                style="margin-top: 20px; width: 100%; padding: 12px; font-size: 16px; border-radius: 8px; cursor: pointer;">Close</button>
+
+        <p id="authStatus" style="text-align: center; margin-top: 15px; font-size: 16px;"></p>
+    </div>
+</div>
+
+<script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+
+    const supabase = createClient(
+        'https://zdourwrnqgneosbwrfye.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpkb3Vyd3JucWduZW9zYndyZnllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgxODc4NzEsImV4cCI6MjA2Mzc2Mzg3MX0.ZqyXSQZX4orJsCSDxElLHC0ZKByn5Z-t8DzXqI5DpZA'
+
+    );
+    window.supabase = supabase;
+
+    const session = await supabase.auth.getSession();
+    if (session.data.session) {
+        const user = session.data.session.user;
+        document.getElementById('userEmail').textContent = user.email;
+        localStorage.setItem("userId", user.id);
+        updateToolOptions(true); // Користувач авторизований
+    } else {
+        updateToolOptions(false); // Гість
+    }
+
+
+    window.registerUser = async function () {
+        const email = document.getElementById('email').value.trim().toLowerCase();
+        const password = document.getElementById('password').value;
+
+        const { data: existingUser, error: selectError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('username', email);
+
+        if (selectError) {
+            document.getElementById("authStatus").textContent = "Error checking user: " + selectError.message;
+            return;
+        }
+
+        if (existingUser.length > 0) {
+            document.getElementById("authStatus").textContent = "Користувач з таким email вже зареєстрований.";
+            return;
+        }
+
+        const { data, error } = await supabase.auth.signUp({ email, password });
+
+        if (error) {
+            document.getElementById("authStatus").textContent = error.message;
+            return;
+        }
+
+        const { error: insertError } = await supabase
+            .from('users')
+            .insert([{ username: email }]);
+
+        if (insertError) {
+            document.getElementById("authStatus").textContent = "Зареєстровано, але не вдалося додати в таблицю: " + insertError.message;
+        } else {
+            document.getElementById("authStatus").textContent = "Зареєстровано. Перевірте email.";
+        }
+    };
+
+    window.loginUser = async function () {
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+        if (error) {
+            document.getElementById("authStatus").textContent = error.message;
+        } else {
+            document.getElementById("authStatus").textContent = "Успішний вхід!";
+            document.getElementById("userEmail").textContent = email;
+            updateToolOptions(true);
+            localStorage.setItem("userId", data.user.id);
+            closeAuthModal();
+        }
+    };
+
+    window.logoutUser = async function () {
+        await supabase.auth.signOut();
+        document.getElementById("userEmail").textContent = "";
+        localStorage.removeItem("userId");
+        updateToolOptions(false);
+        alert("Ви вийшли з акаунту.");
+    };
+
+    window.openAuthModal = () => {
+        document.getElementById("authModal").style.display = "flex";
+    };
+
+    window.closeAuthModal = () => {
+        document.getElementById("authModal").style.display = "none";
+    };
+</script>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const tool = document.getElementById('tool');
+    const color = document.getElementById('color');
+    const brushSize = document.getElementById('brushSize');
+    const brushSizeValue = document.getElementById('brushSizeValue');
+    const zoomControl = document.getElementById('zoom');
+    const zoomValue = document.getElementById('zoomValue');
+    const canvasContainer = document.getElementById('canvasContainer');
+
+    let startX, startY, drawing = false, snapshot;
+
+    brushSize.addEventListener('input', () => {
+        brushSizeValue.textContent = brushSize.value;
+    });
+
+    zoomControl.addEventListener('input', () => {
+        const scale = parseFloat(zoomControl.value);
+        canvas.style.transform = `scale(${scale})`;
+        zoomValue.textContent = `${Math.round(scale * 100)}%`;
+    });
+
+    canvas.addEventListener('mousedown', e => {
+        startX = e.offsetX;
+        startY = e.offsetY;
+        drawing = true;
+        snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    });
+
+    canvas.addEventListener('mousemove', e => {
+        if (!drawing) return;
+        ctx.putImageData(snapshot, 0, 0);
+        drawShape(e.offsetX, e.offsetY);
+    });
+
+    canvas.addEventListener('mouseup', () => drawing = false);
+
+    function drawShape(x, y) {
+        ctx.strokeStyle = color.value;
+        ctx.lineWidth = brushSize.value;
+        const w = x - startX, h = y - startY;
+
+        switch (tool.value) {
+            case 'line':
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+                break;
+            case 'rectangle':
+                ctx.strokeRect(startX, startY, w, h);
+                break;
+            case 'square':
+                const side = Math.max(Math.abs(w), Math.abs(h));
+                ctx.strokeRect(startX, startY, Math.sign(w) * side, Math.sign(h) * side);
+                break;
+            case 'circle':
+                ctx.beginPath();
+                ctx.ellipse(startX + w / 2, startY + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, 2 * Math.PI);
+                ctx.stroke();
+                break;
+            case 'triangle':
+                ctx.beginPath();
+                ctx.moveTo(startX + w / 2, startY);
+                ctx.lineTo(startX, startY + h);
+                ctx.lineTo(startX + w, startY + h);
+                ctx.closePath();
+                ctx.stroke();
+                break;
+            case 'heart':
+                ctx.beginPath();
+                let x = startX + w / 2;
+                let y = startY + h / 2;
+                let scale = Math.min(Math.abs(w), Math.abs(h)) / 20;
+                ctx.moveTo(x, y);
+                ctx.bezierCurveTo(x - 5 * scale, y - 5 * scale, x - 10 * scale, y + 5 * scale, x, y + 10 * scale);
+                ctx.bezierCurveTo(x + 10 * scale, y + 5 * scale, x + 5 * scale, y - 5 * scale, x, y);
+                ctx.stroke();
+                break;
+
+            case 'star':
+                const spikes = 5;
+                const outerRadius = Math.min(Math.abs(w), Math.abs(h)) / 2;
+                const innerRadius = outerRadius / 2.5;
+                const cx = startX + w / 2;
+                const cy = startY + h / 2;
+
+                ctx.beginPath();
+                let rot = Math.PI / 2 * 3;
+                let step = Math.PI / spikes;
+
+                ctx.moveTo(cx, cy - outerRadius);
+                for (let i = 0; i < spikes; i++) {
+                    let x1 = cx + Math.cos(rot) * outerRadius;
+                    let y1 = cy + Math.sin(rot) * outerRadius;
+                    ctx.lineTo(x1, y1);
+                    rot += step;
+
+                    x1 = cx + Math.cos(rot) * innerRadius;
+                    y1 = cy + Math.sin(rot) * innerRadius;
+                    ctx.lineTo(x1, y1);
+                    rot += step;
+                }
+                ctx.lineTo(cx, cy - outerRadius);
+                ctx.closePath();
+                ctx.stroke();
+                break;
+
+        }
+    }
+
+   /* function drawStar(cx, cy, spikes, outerRadius, innerRadius) {
+        let rot = Math.PI / 2 * 3;
+        let x = cx;
+        let y = cy;
+        let step = Math.PI / spikes;
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - outerRadius);
+        for (let i = 0; i < spikes; i++) {
+            x = cx + Math.cos(rot) * outerRadius;
+            y = cy + Math.sin(rot) * outerRadius;
+            ctx.lineTo(x, y);
+            rot += step;
+
+            x = cx + Math.cos(rot) * innerRadius;
+            y = cy + Math.sin(rot) * innerRadius;
+            ctx.lineTo(x, y);
+            rot += step;
+        }
+        ctx.lineTo(cx, cy - outerRadius);
+        ctx.closePath();
+        ctx.stroke();
+    }
+*/
+    function clearCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    document.getElementById("download-png-btn").addEventListener("click", () => {
+        const link = document.createElement("a");
+        link.download = "drawing.png";
+        link.href = canvas.toDataURL();
+        link.click();
+    });
+    canvas.addEventListener('mousedown', e => {
+        startX = e.offsetX;
+        startY = e.offsetY;
+        drawing = true;
+        if (tool.value !== 'free') {
+            snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+        }
+    });
+
+    canvas.addEventListener('mousemove', e => {
+        if (!drawing) return;
+        if (tool.value === 'free') {
+            ctx.lineTo(e.offsetX, e.offsetY);
+            ctx.strokeStyle = color.value;
+            ctx.lineWidth = brushSize.value;
+            ctx.stroke();
+        } else {
+            ctx.putImageData(snapshot, 0, 0);
+            drawShape(e.offsetX, e.offsetY);
+        }
+    });
+
+</script>
+<script>
+    document.getElementById("download-png-btn").addEventListener("click", function () {
+        const canvas = document.getElementById("canvas");
+        const link = document.createElement("a");
+        link.href = canvas.toDataURL("image/png");
+        link.download = "drawing.png";
+        link.click();
+    });
+    function loadImageFromFile(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const img = new Image();
+            img.onload = function() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+</script>
+<script>
+    function updateToolOptions(isLoggedIn) {
+        const toolSelect = document.getElementById('tool');
+        toolSelect.innerHTML = ''; // Очистити поточні опції
+
+        // Базові фігури
+        const basicTools = [
+            { value: 'line', text: 'Line' },
+            { value: 'rectangle', text: 'Rectangle' },
+            { value: 'square', text: 'Square' },
+            { value: 'circle', text: 'Circle' }
+        ];
+
+        // Додаткові фігури та вільне малювання
+        const extraTools = [
+            { value: 'free', text: 'Free Draw' },
+            { value: 'triangle', text: 'Triangle' },
+            { value: 'star', text: 'Star' },
+            { value: 'heart', text: 'Heart' }
+        ];
+
+        const tools = isLoggedIn ? basicTools.concat(extraTools) : basicTools;
+
+        tools.forEach(tool => {
+            const option = document.createElement('option');
+            option.value = tool.value;
+            option.textContent = tool.text;
+            toolSelect.appendChild(option);
+        });
+    }
+</script>
+<script>
+    function updateToolOptions(isLoggedIn) {
+        const toolSelect = document.getElementById('tool');
+        const previousValue = toolSelect.value;
+
+        // Очистити всі опції
+        toolSelect.innerHTML = '';
+
+        // Базові інструменти - завжди доступні
+        const basicTools = [
+            { value: 'line', text: 'Line' },
+            { value: 'rectangle', text: 'Rectangle' },
+            { value: 'square', text: 'Square' },
+            { value: 'circle', text: 'Circle' }
+        ];
+
+        // Додаткові інструменти - тільки після авторизації
+        const extraTools = [
+            { value: 'free', text: 'Free Draw' },
+            { value: 'triangle', text: 'Triangle' },
+            { value: 'star', text: 'Star' },
+            { value: 'heart', text: 'Heart' }
+        ];
+
+        // Додати базові інструменти в список
+        basicTools.forEach(tool => {
+            const option = document.createElement('option');
+            option.value = tool.value;
+            option.textContent = tool.text;
+            toolSelect.appendChild(option);
+        });
+
+        // Якщо користувач авторизований — додати додаткові інструменти
+        if (isLoggedIn) {
+            extraTools.forEach(tool => {
+                const option = document.createElement('option');
+                option.value = tool.value;
+                option.textContent = tool.text;
+                toolSelect.appendChild(option);
+            });
+        }
+
+        // Перевірити, чи попередній вибір ще доступний, інакше переключити на базовий
+        const availableValues = Array.from(toolSelect.options).map(opt => opt.value);
+        if (!availableValues.includes(previousValue)) {
+            toolSelect.value = 'line';
+            // Можна показати повідомлення, якщо потрібно:
+            // alert('Обраний інструмент доступний лише після авторизації. Вибрано базовий інструмент.');
+        } else {
+            toolSelect.value = previousValue;
+        }
+    }
+
+</script>
+
+</body>
+</html>
